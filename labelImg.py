@@ -9,10 +9,13 @@ import sys
 import webbrowser as wb
 from functools import partial
 
+
 try:
+    from PyQt5 import QtGui
     from PyQt5.QtGui import *
     from PyQt5.QtCore import *
     from PyQt5.QtWidgets import *
+    from PyQt5.QtGui import QPixmap
 except ImportError:
     # needed for py3+qt4
     # Ref:
@@ -995,7 +998,32 @@ class MainWindow(QMainWindow, WindowMixin):
             else:
                 # Load image:
                 # read data first and store for saving into label file.
-                self.image_data = read(unicode_file_path, None)
+                # read the first image in video
+                VIDEO_SUFFIX = ['.mp4', '.avi', '.mov']
+                def ends_with(string, word_list):
+                    for word in word_list:
+                        if string.endswith(word):
+                            return True
+                    return False
+                def convert_cv_qt(cv_img):
+                    """Convert from an opencv image to QPixmap"""
+                    rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+                    h, w, ch = rgb_image.shape
+                    bytes_per_line = ch * w
+                    convert_to_Qt_format = QtGui.QImage(rgb_image.data, w, h, bytes_per_line, QtGui.QImage.Format_RGB888)         
+                    return convert_to_Qt_format
+                
+                if ends_with(unicode_file_path, VIDEO_SUFFIX):
+                    import cv2
+                    cap = cv2.VideoCapture(unicode_file_path)
+                    while True:
+                        ret, cv_img = cap.read()
+                        if ret:
+                            self.image_data = convert_cv_qt(cv_img)
+                        break
+                else:
+                    self.image_data = read(unicode_file_path, None)
+
                 self.label_file = None
                 self.canvas.verified = False
 
@@ -1209,8 +1237,10 @@ class MainWindow(QMainWindow, WindowMixin):
             return
         path = os.path.dirname(ustr(self.file_path)) if self.file_path else '.'
         formats = ['*.%s' % fmt.data().decode("ascii").lower() for fmt in QImageReader.supportedImageFormats()]
-        filters = "Image & Label files (%s)" % ' '.join(formats + ['*%s' % LabelFile.suffix])
-        filename,_ = QFileDialog.getOpenFileName(self, '%s - Choose Image or Label file' % __appname__, path, filters)
+        video_formats =  ['*.mp4', '*.avi']
+
+        filters = "Image & Videos files (%s)" % ' '.join(formats + video_formats)
+        filename,_ = QFileDialog.getOpenFileName(self, '%s - Choose Image or Video file' % __appname__, path, filters)
         if filename:
             if isinstance(filename, (tuple, list)):
                 filename = filename[0]
