@@ -37,7 +37,7 @@ from libs.shape import Shape, DEFAULT_LINE_COLOR, DEFAULT_FILL_COLOR
 from libs.stringBundle import StringBundle
 from libs.canvas import Canvas
 from libs.zoomWidget import ZoomWidget
-from libs.lightWidget import LightWidget
+from libs.ocrWidget import OCRWidget
 from libs.labelDialog import LabelDialog
 from libs.colorDialog import ColorDialog
 from libs.labelFile import LabelFile, LabelFileError, LabelFileFormat
@@ -180,6 +180,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.file_dock.setWidget(file_list_container)
 
         self.zoom_widget = ZoomWidget()
+        self.ocr_widget = OCRWidget()
         self.color_dialog = ColorDialog(parent=self)
 
         self.canvas = Canvas(parent=self)
@@ -299,6 +300,17 @@ class MainWindow(QMainWindow, WindowMixin):
             self.MANUAL_ZOOM: lambda: 1,
         }
 
+        ocr = QWidgetAction(self)
+        ocr.setDefaultWidget(self.ocr_widget)
+        self.ocr_widget.setWhatsThis(
+            u"AI based text detection and recognition. ")
+        self.ocr_widget.setEnabled(False)
+        recognize = action(u'Recognize', self.recognize_text,
+                        'r', 'new', u'AI based text recognition', enabled=False)
+
+        ocr_actions = (self.ocr_widget, recognize)
+
+        
         labels = self.dock.toggleViewAction()
         labels.setText(get_str('showHide'))
         labels.setShortcut('Ctrl+Shift+L')
@@ -324,7 +336,9 @@ class MainWindow(QMainWindow, WindowMixin):
                              
                               zoom=zoom, zoomIn=zoom_in, zoomOut=zoom_out, zoomOrg=zoom_org,
                               fitWindow=fit_window, fitWidth=fit_width,
+                              recognize=recognize,
                               zoomActions=zoom_actions,
+                              ocrAction = ocr_actions,
                               fileMenuActions=(
                                   open, save, save_as, close, reset_all, quit),
                               beginner=(), advanced=(),
@@ -372,7 +386,8 @@ class MainWindow(QMainWindow, WindowMixin):
             labels, advanced_mode, None,
             hide_all, show_all, None,
             zoom_in, zoom_out, zoom_org, None,
-            fit_window, fit_width, None))
+            fit_window, fit_width, None,
+            recognize))
 
         self.menus.file.aboutToShow.connect(self.update_file_menu)
 
@@ -385,7 +400,8 @@ class MainWindow(QMainWindow, WindowMixin):
         self.tools = self.toolbar('Tools')
         self.actions.beginner = (
             open,  change_save_dir, save,  None, create, copy, delete, None,
-            zoom_in, zoom, zoom_out, fit_window, fit_width, None)
+            zoom_in, zoom, zoom_out, fit_window, fit_width, None,
+            recognize, ocr)
 
         self.actions.advanced = (
             open,  change_save_dir, save, None,
@@ -1451,6 +1467,9 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def toggle_draw_square(self):
         self.canvas.set_drawing_shape_to_square(self.draw_squares_option.isChecked())
+
+    def recognize_text(self):
+        pass
 
 def inverted(color):
     return QColor(*[255 - v for v in color.getRgb()])
