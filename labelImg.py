@@ -8,6 +8,8 @@ import shutil
 import sys
 import webbrowser as wb
 from functools import partial
+from tools.common import load_ie_core
+from tools.text_recognition import Model as RecognitionModel
 
 
 try:
@@ -338,7 +340,7 @@ class MainWindow(QMainWindow, WindowMixin):
                               fitWindow=fit_window, fitWidth=fit_width,
                               recognize=recognize,
                               zoomActions=zoom_actions,
-                              ocrAction = ocr_actions,
+                              ocrActions = ocr_actions,
                               fileMenuActions=(
                                   open, save, save_as, close, reset_all, quit),
                               beginner=(), advanced=(),
@@ -477,6 +479,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Callbacks:
         self.zoom_widget.valueChanged.connect(self.paint_canvas)
+        self.ocr_widget.valueChanged.connect(self.paint_canvas)
 
         self.populate_mode_actions()
 
@@ -493,7 +496,7 @@ class MainWindow(QMainWindow, WindowMixin):
         if event.key() == Qt.Key_Control:
             # Draw rectangle if Ctrl is pressed
             self.canvas.set_drawing_shape_to_square(True)
-
+    
     def no_shapes(self):
         return not self.items_to_shapes
 
@@ -542,6 +545,8 @@ class MainWindow(QMainWindow, WindowMixin):
     def toggle_actions(self, value=True):
         """Enable/Disable widgets which depend on an opened image."""
         for z in self.actions.zoomActions:
+            z.setEnabled(value)
+        for z in self.actions.ocrActions:
             z.setEnabled(value)
         for action in self.actions.onLoadActive:
             action.setEnabled(value)
@@ -1087,30 +1092,18 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.default_save_dir is not None:
             basename = os.path.basename(os.path.splitext(file_path)[0])
             xml_path = os.path.join(self.default_save_dir, basename + XML_EXT)
-            txt_path = os.path.join(self.default_save_dir, basename + TXT_EXT)
-            json_path = os.path.join(self.default_save_dir, basename + JSON_EXT)
 
-            """Annotation file priority:
-            PascalXML > YOLO
+            """Annotation file:
+            PascalXML 
             """
             if os.path.isfile(xml_path):
-                self.load_pascal_xml_by_filename(xml_path)
-            elif os.path.isfile(txt_path):
-                self.load_yolo_txt_by_filename(txt_path)
-            elif os.path.isfile(json_path):
-                self.load_create_ml_json_by_filename(json_path, file_path)
-
+                self.load_pascal_xml_by_filename(xml_path)                
         else:
             xml_path = os.path.splitext(file_path)[0] + XML_EXT
-            txt_path = os.path.splitext(file_path)[0] + TXT_EXT
-            json_path = os.path.splitext(file_path)[0] + JSON_EXT
+
 
             if os.path.isfile(xml_path):
                 self.load_pascal_xml_by_filename(xml_path)
-            elif os.path.isfile(txt_path):
-                self.load_yolo_txt_by_filename(txt_path)
-            elif os.path.isfile(json_path):
-                self.load_create_ml_json_by_filename(json_path, file_path)
 
     def resizeEvent(self, event):
         if self.canvas and not self.image.isNull()\
@@ -1422,38 +1415,10 @@ class MainWindow(QMainWindow, WindowMixin):
         if os.path.isfile(xml_path) is False:
             return
 
-        self.set_format(FORMAT_PASCALVOC)
-
         t_voc_parse_reader = PascalVocReader(xml_path)
-        shapes = t_voc_parse_reader.get_shapes()
-        self.load_labels(shapes)
+        self.shapes = t_voc_parse_reader.get_shapes()
+        self.load_labels(self.shapes)
         self.canvas.verified = t_voc_parse_reader.verified
-
-    def load_yolo_txt_by_filename(self, txt_path):
-        if self.file_path is None:
-            return
-        if os.path.isfile(txt_path) is False:
-            return
-
-        self.set_format(FORMAT_YOLO)
-        t_yolo_parse_reader = YoloReader(txt_path, self.image)
-        shapes = t_yolo_parse_reader.get_shapes()
-        print(shapes)
-        self.load_labels(shapes)
-        self.canvas.verified = t_yolo_parse_reader.verified
-
-    def load_create_ml_json_by_filename(self, json_path, file_path):
-        if self.file_path is None:
-            return
-        if os.path.isfile(json_path) is False:
-            return
-
-        self.set_format(FORMAT_CREATEML)
-
-        create_ml_parse_reader = CreateMLReader(json_path, file_path)
-        shapes = create_ml_parse_reader.get_shapes()
-        self.load_labels(shapes)
-        self.canvas.verified = create_ml_parse_reader.verified
 
     def copy_previous_bounding_boxes(self):
         current_index = self.m_img_list.index(self.file_path)
@@ -1469,7 +1434,45 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.set_drawing_shape_to_square(self.draw_squares_option.isChecked())
 
     def recognize_text(self):
-        pass
+        # initialize the text recognition model
+        ie_core = load_ie_core('CPU', None)
+        text_recognition_model = RecognitionModel("tools/model/text_recognition_num/number_recognition.xml", 'CPU', ie_core)
+        idx = 0
+        columns = ['time']
+        res = []
+        # get bounding box through parsing label file
+        self.show_bounding_box_from_annotation_file(self.file_path)
+        # AI inference
+        import cv2
+        import numpy as np
+        import pandas as pd
+        cap = cv2.VideoCapture(self.file_path)
+        while True:
+            ret, frame = cap.read()
+            idx += 1
+            if ret is False:
+                break
+            if idx % 5 != 0:
+                continue
+            temp_res = []
+            info_time = round(idx/30.0,2)
+            temp_res.append(str(info_time))
+            for label, points, line_color, fill_color, difficult in self.shapes:
+                if len(columns)-1 != len(self.shapes):
+                    columns.append(label)
+                x_right = points[0][0]
+                y_right = points[0][1]
+                x_left = points[1][0]
+                y_left = points[2][1]
+                crop_frame = frame[y_right:y_left, x_right:x_left]
+                result  = text_recognition_model(crop_frame)
+                temp_res.append(result)
+            res.append(temp_res)
+        res = np.array(res)
+        res_csv = pd.DataFrame(res, columns= columns)
+        cvs_file = self.file_path.replace(".mp4", ".csv")
+        res_csv.to_csv(cvs_file, index=False)
+        
 
 def inverted(color):
     return QColor(*[255 - v for v in color.getRgb()])
